@@ -54,3 +54,7 @@ dkms.conf
 node
 *.swp
 .vagrant/
+vagrant
+*.pdf
+py/ip-dynamic-routing-env/
+*.lnx
