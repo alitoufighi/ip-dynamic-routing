@@ -8,6 +8,7 @@ if __name__ == '__main__':
     node_name = sys.argv[1]
     node = Node(node_name)
 
-    node.register_handler(protocol_num=0, handler=print_handler)
-    node.register_handler(protocol_num=200, handler=route_handler)
+    node.register_handler(protocol_num=PRINT_PROTOCOL, handler=node.print_handler)
+    node.register_handler(protocol_num=ROUTE_PROTOCOL, handler=node.route_handler)
+    node.register_handler(protocol_num=ROUTING_TABLE_UPDATE_PROTOCOL, handler=node.routing_table_update_handler)
     node.run()
