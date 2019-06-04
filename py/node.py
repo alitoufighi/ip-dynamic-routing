@@ -8,6 +8,7 @@ from ip import IPPacket
 from protocol_handler import *
 from util import Util
 from routing_table_item import *
+
 LNX_FILES_ROOT = '../tools/'
 MAX_TRANSFER_UNIT = 1400
 
@@ -18,40 +19,37 @@ class Node:
         self.addr, self.interfaces = self._read_links()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(self.addr.to_tuple())
-        # self.protocol_handler = ProtocolHandler()
 
-        self.routing_table = {}  # {dest_ip: (distance, interface_ip)}
+        self.routing_table = {}
         self.bring_up()
 
-        self.protocol_switcher = {}  # for protocol handling
+        self.protocol_switcher = {}
 
         print(f"Node {self.name} started.")
         print(self.addr)
         print(self.interfaces)
         print("---------------------")
 
-    # def register_handler(self, protocol_num, handler):
-    #     self.protocol_handler.register_handler(protocol_num, handler)
-
-    def _broadcast_routing_table_to_neighbors(self):
+    def _broadcast_routing_table_to_neighbors(self, protocol):
         print("BROADCASTING MY ROUTING TABLE TO MY NEIGHBORS")
         print(self.routing_table)
         for interface in self.interfaces:
-            print(f"SENT TO {interface.peer_virt_ip}")
-            #self.routing_table[interface.peer_virt_ip].addtopath(interface.my_virt_ip)
-            ip_packet = IPPacket(interface.my_virt_ip,
-                                 interface.peer_virt_ip,
-                                 ROUTING_TABLE_UPDATE_PROTOCOL,
-                                 self.routing_table)
-            self.socket.sendto(pickle.dumps(ip_packet),
-                               interface.addr.to_tuple())
+            if interface.is_up:
+                print(f"SENT TO {interface.peer_virt_ip}")
+                ip_packet = IPPacket(interface.my_virt_ip,
+                                     interface.peer_virt_ip,
+                                     protocol,
+                                     self.routing_table)
+                self.socket.sendto(pickle.dumps(ip_packet),
+                                   interface.addr.to_tuple())
         print("--------------------")
 
     def bring_up(self):
         for interface in self.interfaces:
-            self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
-                                                                        forwarding_interface=interface.my_virt_ip)
-        self._broadcast_routing_table_to_neighbors()
+            if interface.is_up:
+                self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
+                                                                            forwarding_interface=interface.my_virt_ip)
+        self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def bring_down(self):
         self.routing_table = {}
@@ -74,7 +72,8 @@ class Node:
     def _interfaces_handler(self):
         print(f"Showing interfaces for {self.addr}")
         for interface in self.interfaces:
-            print(f'{interface.addr}, {interface.my_virt_ip} -> {interface.peer_virt_ip}')
+            print(f'{"UP" if interface.is_up else "DOWN"}: \
+{interface.addr}, {interface.my_virt_ip} -> {interface.peer_virt_ip}')
 
     def _routes_handler(self):
         print(f"Routing table for {self.name} is:")
@@ -87,15 +86,26 @@ class Node:
         except IndexError:
             print("Bad input")
             return
-        print(f"Bringing {interface_id} down")
 
-    def down_update_handler(self,ip_packet):
+        print(f"Bringing {interface_id} down")
+        self.routing_table = {}
+
+        interface = self._find_interface(src_ip=interface_id)
+        interface.down()
+
+        for interface in self.interfaces:
+            if interface.is_up:
+                self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
+                                                                            forwarding_interface=interface.my_virt_ip)
+        self._broadcast_routing_table_to_neighbors(DOWN_PROTOCOL)
+
+    def down_update_handler(self, ip_packet):
         self.routing_table = {}
         for interface in self.interfaces:
-            self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
-                                                                       forwarding_interface=interface.my_virt_ip)
+            if interface.is_up:
+                self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
+                                                                            forwarding_interface=interface.my_virt_ip)
         self._update_routing_table(ip_packet)
-        
 
     def _up_handler(self, *args):
         try:
@@ -103,20 +113,23 @@ class Node:
         except IndexError:
             print("Bad input")
             return
-        interface = self._find_interface(src_ip = interface_id)
-        if interface.is_up():
-            print("interface is already up")
-            return 
-        self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance = 0,
-                                                                    forwarding_interface=interface.my_virt_ip)
-        self._broadcast_routing_table_to_neighbors()
-        print(f"Bringing {interface_id} up")
 
-    def _find_interface(self, dest_ip=None, src_ip = None):
+        self.routing_table = {}
+
+        interface = self._find_interface(src_ip=interface_id)
+        interface.up()
+
         for interface in self.interfaces:
-            if dest_ip != None and interface.peer_virt_ip == dest_ip:
+            if interface.is_up:
+                self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
+                                                                            forwarding_interface=interface.my_virt_ip)
+        self._broadcast_routing_table_to_neighbors(DOWN_PROTOCOL)
+
+    def _find_interface(self, dest_ip=None, src_ip=None):
+        for interface in self.interfaces:
+            if dest_ip is not None and interface.peer_virt_ip == dest_ip:
                 return interface
-            if src_ip != None and interface.my_virt_ip == src_ip:
+            if src_ip is not None and interface.my_virt_ip == src_ip:
                 return interface
 
     def _send_handler(self, *args):
@@ -164,27 +177,25 @@ class Node:
         }
         return switcher.get(cmd, self._default_cmd)(*args)
 
-    def _traceroute_handler(self,virtual_ip):
+    def _traceroute_handler(self, virtual_ip):
         print("‫‪Traceroute‬‬ ‫‪from‬‬ " + self.addr.ip + "to" + virtual_ip)
-        l = []
-        l.append(self._find_route(virtual_ip).my_virt_ip)
-        ip_packet = IPPacket(self._find_route(virtual_ip).my_virt_ip, virtual_ip, TRACEROUTEPROTOCOL, l)
+        path = [self._find_route(virtual_ip).my_virt_ip]
+        ip_packet = IPPacket(self._find_route(virtual_ip).my_virt_ip, virtual_ip, TRACEROUTE_PROTOCOL, path)
         self.socket.sendto(pickle.dumps(ip_packet),
                            self._find_route(virtual_ip).addr.to_tuple())
-        
 
     def rcv_traceroute_handler(self, ip_packet):
         ip_packet.payload.append(self._find_route(ip_packet.header.dst_addr).my_virt_ip)
         if self._is_my_packet(ip_packet.header.dst_addr):
             print("my packet arrived")
-            #ip_packet.header.src_addr , ip_packet.header.dst_addr = ip_packet.header.dst_addr , ip_packet.header.src_addr
-            newpacket = IPPacket(ip_packet.header.dst_addr, ip_packet.header.src_addr, TRACEROUTEPROTOCOLRESULT, ip_packet.payload)
+            newpacket = IPPacket(ip_packet.header.dst_addr, ip_packet.header.src_addr, TRACEROUTE_PROTOCOL_RESULT,
+                                 ip_packet.payload)
             self.socket.sendto(pickle.dumps(newpacket),
-                            self._find_route(newpacket.header.dst_addr).addr.to_tuple())
+                               self._find_route(newpacket.header.dst_addr).addr.to_tuple())
         else:
             print("in another else")
             self.socket.sendto(pickle.dumps(ip_packet),
-                            self._find_route(ip_packet.header.dst_addr).addr.to_tuple())
+                               self._find_route(ip_packet.header.dst_addr).addr.to_tuple())
 
     def trace_route_result_handler(self, ip_packet):
         if self._is_my_packet(ip_packet.header.dst_addr):
@@ -194,8 +205,6 @@ class Node:
             print("in else")
             self.socket.sendto(pickle.dumps(ip_packet),
                                self._find_route(ip_packet.header.dst_addr).addr.to_tuple())
-
-
 
     def _update_routing_table(self, ip_packet):
         neighbor_routing_table = ip_packet.payload
@@ -215,7 +224,6 @@ class Node:
         for node, routing_table_item in neighbor_routing_table.items():
             if node in self.routing_table:
                 if routing_table_item.distance + 1 < self.routing_table[node].distance:
-
                     self.routing_table[node] = RoutingTableItem(distance=routing_table_item.distance + 1,
                                                                 forwarding_interface=interface_to_neighbor.my_virt_ip)
                     changed = True
@@ -228,7 +236,7 @@ class Node:
         print(self.routing_table)
         print("----------------------")
         if changed:
-            self._broadcast_routing_table_to_neighbors()
+            self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def register_handler(self, protocol_num, handler):
         if protocol_num in self.protocol_switcher:
@@ -249,7 +257,6 @@ class Node:
     def route_handler(self, ip_packet):
         print(f"ROUTE HANDLER CALLED ON {ip_packet}")
         destination_ip = ip_packet.header.dst_addr
-        # check if destination ip is not in my interfaces! (i'm not the destination)
         if self._is_my_packet(destination_ip):
             print("My Packet Received:")
             print(ip_packet.payload)
@@ -280,21 +287,19 @@ class Node:
         for node, routing_table_item in neighbor_routing_table.items():
             if node in self.routing_table:
                 if routing_table_item.distance + 1 < self.routing_table[node].distance:
-
+                    changed = True
                     self.routing_table[node] = RoutingTableItem(distance=routing_table_item.distance + 1,
                                                                 forwarding_interface=interface_to_neighbor.my_virt_ip)
-                    changed = True
             else:
+                changed = True
                 self.routing_table[node] = RoutingTableItem(distance=routing_table_item.distance + 1,
                                                             forwarding_interface=interface_to_neighbor.my_virt_ip)
-                changed = True
 
         print("ROUTING TABLE AFTER UPDATE:")
         print(self.routing_table)
         print("----------------------")
         if changed:
-            self._broadcast_routing_table_to_neighbors()
-
+            self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def process_user_input(self):
         try:

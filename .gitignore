@@ -58,3 +58,4 @@ vagrant
 *.pdf
 py/ip-dynamic-routing-env/
 *.lnx
+py/__pycache__/*

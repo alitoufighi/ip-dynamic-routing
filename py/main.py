@@ -11,7 +11,8 @@ if __name__ == '__main__':
     node.register_handler(protocol_num=PRINT_PROTOCOL, handler=node.print_handler)
     node.register_handler(protocol_num=ROUTE_PROTOCOL, handler=node.route_handler)
     node.register_handler(protocol_num=ROUTING_TABLE_UPDATE_PROTOCOL, handler=node.routing_table_update_handler)
-    node.register_handler(protocol_num=TRACEROUTEPROTOCOL, handler=node.rcv_traceroute_handler)
-    node.register_handler(protocol_num=TRACEROUTEPROTOCOLRESULT, handler = node.trace_route_result_handler)
-    node.register_handler(protocol_num=DOWN_PROTOCOL, handler = node.down_update_handler)
+    node.register_handler(protocol_num=TRACEROUTE_PROTOCOL, handler=node.rcv_traceroute_handler)
+    node.register_handler(protocol_num=TRACEROUTE_PROTOCOL_RESULT, handler=node.trace_route_result_handler)
+    node.register_handler(protocol_num=DOWN_PROTOCOL, handler=node.down_update_handler)
+
     node.run()
