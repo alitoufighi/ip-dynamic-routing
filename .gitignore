@@ -56,6 +56,6 @@ node
 .vagrant/
 vagrant
 *.pdf
-py/ip-dynamic-routing-env/
+*env/
 *.lnx
-py/__pycache__/*
+*/__pycache__/*
