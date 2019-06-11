@@ -51,9 +51,6 @@ class Node:
                                                                             forwarding_interface=interface.my_virt_ip)
         self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
-    def bring_down(self):
-        self.routing_table = {}
-
     def _read_links(self):
         with open(f'{LNX_FILES_ROOT}{self.name}.lnx') as f:
             my_status = f.readline().split()
@@ -66,6 +63,10 @@ class Node:
 
     def _quit_handler(self):
         print("Exiting...")
+        for interface in self.interfaces:
+            if interface.is_up:
+                bring_down(interface)
+                
         self.socket.close()
         exit(0)
 
@@ -86,13 +87,13 @@ class Node:
         except IndexError:
             print("Bad input")
             return
-
-        print(f"Bringing {interface_id} down")
-        self.routing_table = {}
-
         interface = self._find_interface(src_ip=interface_id)
-        interface.down()
+        print(f"Bringing {interface_id} down")
+        self.bring_down(interface)
 
+    def bring_down(self,interface):
+        self.routing_table = {}
+        interface.down()
         for interface in self.interfaces:
             if interface.is_up:
                 self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
