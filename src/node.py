@@ -63,10 +63,8 @@ class Node:
 
     def _quit_handler(self):
         print("Exiting...")
-        for interface in self.interfaces:
-            if interface.is_up:
-                bring_down(interface)
-                
+        self.routing_table = {}
+        self._broadcast_routing_table_to_neighbors(DOWN_PROTOCOL)
         self.socket.close()
         exit(0)
 
