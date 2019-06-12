@@ -10,7 +10,7 @@ from util import Util
 from routing_table_item import *
 
 LNX_FILES_ROOT = '../tools/'
-MAX_TRANSFER_UNIT = 1400
+MAX_TRANSMISSION_UNIT = 1400
 
 
 class Node:
@@ -310,7 +310,7 @@ class Node:
         self.cmd_handler(cmd, args)
 
     def process_socket_reply(self):
-        packet_data, _ = self.socket.recvfrom(MAX_TRANSFER_UNIT)
+        packet_data, _ = self.socket.recvfrom(MAX_TRANSMISSION_UNIT)
         ip_packet = pickle.loads(packet_data)
         self.run_handler(ip_packet)
         print(f'Received a new packet from {ip_packet.header.src_addr} with payload "{ip_packet.payload}"')
