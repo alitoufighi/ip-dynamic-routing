@@ -90,11 +90,10 @@ class Node:
         print(f"{interface_id} is down.")
 
     def bring_interface_down(self, down_interface):
-        self.routing_table.clear()
         for interface in self.up_interfaces:
-            if interface.my_virt_ip != down_interface.my_virt_ip:
-                self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
-                                                                            forwarding_interface=interface.my_virt_ip)
+            if self.routing_table[interface.my_virt_ip].forwarding_interface == down_interface.my_virt_ip or self.routing_table[interface.peer_virt_ip].forwarding_interface == down_interface.my_virt_ip:
+                del self.routing_table.table[interface.my_virt_ip]
+        
         self._broadcast_routing_table_to_neighbors(DOWN_PROTOCOL)
         down_interface.down()
 
