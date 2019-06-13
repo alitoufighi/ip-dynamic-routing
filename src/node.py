@@ -24,6 +24,7 @@ class Node:
         self.bring_up()
 
         self.protocol_switcher = {}
+        self.down_interfaces_list = []
 
         print(f"Node {self.name} started.")
         print(self.addr)
@@ -79,6 +80,19 @@ class Node:
         print(self.routing_table)
         print("---------------------")
 
+    def _broadcast_change_interface_to_neighbors(self, changed_interface_addresses, protocol):
+        payload = {
+            'routing_table': pickle.dumps(self.routing_table),
+            'interfaces': changed_interface_addresses,
+        }
+        for interface in self.up_interfaces:
+            ip_packet = IPPacket(src_ip=interface.my_virt_ip,
+                                 dest_ip=interface.peer_virt_ip,
+                                 protocol_num=protocol,
+                                 payload=payload)
+            self.socket.sendto(pickle.dumps(ip_packet),
+                               interface.addr.to_tuple())
+
     def _down_handler(self, *args):
         try:
             interface_id = args[0]
@@ -90,11 +104,17 @@ class Node:
         print(f"{interface_id} is down.")
 
     def bring_interface_down(self, down_interface):
+        self.down_interfaces_list.append(down_interface.my_virt_ip)
+        self.down_interfaces_list.append(down_interface.peer_virt_ip)
+        self.routing_table.clear()
         for interface in self.up_interfaces:
-            if self.routing_table[interface.my_virt_ip].forwarding_interface == down_interface.my_virt_ip or self.routing_table[interface.peer_virt_ip].forwarding_interface == down_interface.my_virt_ip:
-                del self.routing_table.table[interface.my_virt_ip]
-        
-        self._broadcast_routing_table_to_neighbors(DOWN_PROTOCOL)
+            if interface == down_interface:
+                continue
+            self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
+                                                                        forwarding_interface=interface.my_virt_ip)
+        down_interface_addresses = [down_interface.my_virt_ip, down_interface.peer_virt_ip]
+        self._broadcast_change_interface_to_neighbors(changed_interface_addresses=down_interface_addresses,
+                                                      protocol=DOWN_PROTOCOL)
         down_interface.down()
 
     def _is_neighbor_interface_down(self, neighbor_routing_table, source_ip):
@@ -104,30 +124,53 @@ class Node:
         return True
 
     def down_update_handler(self, ip_packet):
-        self.routing_table.clear()
-
-        neighbor_routing_table = pickle.loads(ip_packet.payload)
+        neighbor_routing_table = pickle.loads(ip_packet.payload['routing_table'])
 
         interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
         if self._is_neighbor_interface_down(neighbor_routing_table, ip_packet.header.src_addr):
             interface_to_neighbor.down()
 
-        for interface in self.up_interfaces:
-            self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
-                                                                        forwarding_interface=interface.my_virt_ip)
+        down_interface_addresses = ip_packet.payload['interfaces']
 
-        self._update_routing_table(ip_packet)
+        checked_before = all(address in self.down_interfaces_list for address in down_interface_addresses)
+        if not checked_before:
+
+            for interface_address in down_interface_addresses:
+                self.down_interfaces_list.append(interface_address)
+
+            self.routing_table.clear()
+            for interface in self.up_interfaces:
+                self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
+                                                                            forwarding_interface=interface.my_virt_ip)
+
+            changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
+            if changed:
+                self._broadcast_change_interface_to_neighbors(changed_interface_addresses=down_interface_addresses,
+                                                              protocol=DOWN_PROTOCOL)
+        else:
+            changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
+            if changed:
+                self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def up_update_handler(self, ip_packet):
-        self.routing_table.clear()
 
         interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
         interface_to_neighbor.up()  # TODO:detect the interface which its neighbor turned it up and only turn it up!
 
+        self.routing_table.clear()
         for interface in self.up_interfaces:
             self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
                                                                         forwarding_interface=interface.my_virt_ip)
-        self._update_routing_table(ip_packet)
+
+        changed_interface_addresses = ip_packet.payload['interfaces']
+        for changed_interface in changed_interface_addresses:
+            if changed_interface in self.down_interfaces_list:
+                self.down_interfaces_list.remove(changed_interface)
+
+        neighbor_routing_table = pickle.loads(ip_packet.payload['routing_table'])
+        changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
+        if changed:
+            self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def _up_handler(self, *args):
         try:
@@ -140,11 +183,13 @@ class Node:
 
         interface = self._find_interface(src_ip=interface_id)
         interface.up()
-
+        changed_interface_addresses = [interface.my_virt_ip, interface.peer_virt_ip]
         for interface in self.up_interfaces:
             self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
                                                                         forwarding_interface=interface.my_virt_ip)
-        self._broadcast_routing_table_to_neighbors(UP_PROTOCOL)
+
+        self._broadcast_change_interface_to_neighbors(changed_interface_addresses=changed_interface_addresses,
+                                                      protocol=UP_PROTOCOL)
 
     def _find_interface(self, dest_ip=None, src_ip=None):
         for interface in self.interfaces:
@@ -220,21 +265,22 @@ class Node:
     def traceroute_result_handler(self, ip_packet):
         if self._is_my_packet(ip_packet.header.dst_addr):
             path = ip_packet.payload
-            print("\n".join([f"{index+1} {item}" for index, item in enumerate(path)]))
+            print("\n".join([f"{index + 1} {item}" for index, item in enumerate(path)]))
             print(f"Traceroute finished in {len(ip_packet.payload)} hops")
         else:
             self.socket.sendto(pickle.dumps(ip_packet),
                                self._find_route(ip_packet.header.dst_addr).addr.to_tuple())
 
-    def _update_routing_table(self, ip_packet):
-        interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
+    def _update_routing_table(self, neighbor_routing_table, interface_to_neighbor):
+
+        if not interface_to_neighbor.is_up:
+            return True
 
         if interface_to_neighbor is None or not interface_to_neighbor.is_up:
             print("@@@@@@@@@@@@@@@@@@@ interface to neighbor has issues")
             print(interface_to_neighbor)
-            return
+            return False
 
-        neighbor_routing_table = pickle.loads(ip_packet.payload)
         print("----------------------")
         print("NEIGHBOR ROUTING TABLE:")
         print(neighbor_routing_table)
@@ -257,8 +303,7 @@ class Node:
         print("ROUTING TABLE AFTER UPDATE:")
         print(self.routing_table)
         print("----------------------")
-        if changed:
-            self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
+        return changed
 
     def register_handler(self, protocol_num, handler):
         if protocol_num in self.protocol_switcher:
@@ -291,7 +336,11 @@ class Node:
                            interface.addr.to_tuple())
 
     def routing_table_update_handler(self, ip_packet):
-        return self._update_routing_table(ip_packet)
+        interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
+        neighbor_routing_table = pickle.loads(ip_packet.payload)
+        changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
+        if changed:
+            self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def process_user_input(self):
         try:
