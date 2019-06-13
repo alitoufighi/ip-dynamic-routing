@@ -23,6 +23,7 @@ class Node:
         self.routing_table = RoutingTable()
         self.bring_up()
 
+        self.checked_before = []
         self.protocol_switcher = {}
         self.down_interfaces_list = []
 
@@ -64,8 +65,9 @@ class Node:
 
     def _quit_handler(self):
         print("Exiting...")
-        self.routing_table.clear()
-        self._broadcast_routing_table_to_neighbors(DOWN_PROTOCOL)
+        for interface in self.up_interfaces:
+            self.bring_interface_down(interface)
+        #self._broadcast_routing_table_to_neighbors(DOWN_PROTOCOL)
         self.socket.close()
         exit(0)
 
@@ -132,9 +134,15 @@ class Node:
 
         down_interface_addresses = ip_packet.payload['interfaces']
 
-        checked_before = all(address in self.down_interfaces_list for address in down_interface_addresses)
-        if not checked_before:
+        #checked_before = all(address in self.down_interfaces_list for address in down_interface_addresses)
+        should_check = False
+        for address in down_interface_addresses:
+            if address in self.down_interfaces_list:
+                self.checked_before.append(address)
+            else:
+                should_check = True
 
+        if should_check:
             for interface_address in down_interface_addresses:
                 self.down_interfaces_list.append(interface_address)
 
@@ -143,11 +151,14 @@ class Node:
                 self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
                                                                             forwarding_interface=interface.my_virt_ip)
 
+            
             changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
             if changed:
                 self._broadcast_change_interface_to_neighbors(changed_interface_addresses=down_interface_addresses,
                                                               protocol=DOWN_PROTOCOL)
+            
         else:
+            
             changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
             if changed:
                 self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
@@ -299,6 +310,13 @@ class Node:
                 changed = True
                 self.routing_table[node] = RoutingTableItem(distance=routing_table_item.distance + 1,
                                                             forwarding_interface=interface_to_neighbor.my_virt_ip)
+        
+        for node, routing_table_item in neighbor_routing_table.items():
+            if node in self.checked_before:
+                self.checked_before.remove(node)
+            if node in self.checked_before:
+                self.checked_before.remove(node)
+                
 
         print("ROUTING TABLE AFTER UPDATE:")
         print(self.routing_table)
