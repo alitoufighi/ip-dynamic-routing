@@ -22,9 +22,9 @@ class Node:
 
         self.routing_table = RoutingTable()
         self.bring_up()
-        self.checked_before = []
         self.protocol_switcher = {}
         self.down_interfaces_list = []
+        
 
         print(f"Node {self.name} started.")
         print(self.addr)
@@ -62,10 +62,22 @@ class Node:
                 print("Malformed lnx file!")
                 exit(0)
 
+    def _bring_all_interfaces_down(self):
+        for interface in self.up_interfaces:
+            self.down_interfaces_list.append(interface.my_virt_ip)
+            self.down_interfaces_list.append(interface.peer_virt_ip)
+
+        self.routing_table.clear()
+
+        self._broadcast_change_interface_to_neighbors(changed_interface_addresses=self.down_interfaces_list,
+                                                      protocol=DOWN_PROTOCOL)
+
+        for interface in self.up_interfaces:
+            interface.down()
+            
     def _quit_handler(self):
         print("Exiting...")
-        for interface in self.up_interfaces:
-            self.bring_interface_down(interface)
+        self._bring_all_interfaces_down()
         self.socket.close()
         exit(0)
 
@@ -134,13 +146,15 @@ class Node:
 
         #checked_before = all(address in self.down_interfaces_list for address in down_interface_addresses)
         should_check = False
+
         for address in down_interface_addresses:
             if address in self.down_interfaces_list:
-                self.checked_before.append(address)
+                continue
             else:
                 should_check = True
 
         if should_check:
+            
             for interface_address in down_interface_addresses:
                 self.down_interfaces_list.append(interface_address)
 
@@ -159,11 +173,12 @@ class Node:
                 self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def up_update_handler(self, ip_packet):
-
+        
         interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
         interface_to_neighbor.up()  # TODO:detect the interface which its neighbor turned it up and only turn it up!
-
         self.routing_table.clear()
+        self.down_interfaces_list.clear()
+
         for interface in self.up_interfaces:
             self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
                                                                         forwarding_interface=interface.my_virt_ip)
@@ -174,9 +189,6 @@ class Node:
                 self.down_interfaces_list.remove(changed_interface)
 
         neighbor_routing_table = pickle.loads(ip_packet.payload['routing_table'])
-        for node, routing_table_item in neighbor_routing_table.items():
-            if node in self.checked_before:
-                self.checked_before.remove(node)
         changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
         if changed:
             self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
@@ -188,8 +200,9 @@ class Node:
             print("Bad input")
             return
 
+        
         self.routing_table.clear()  # TODO: test
-
+        self.down_interfaces_list.clear()
         interface = self._find_interface(src_ip=interface_id)
         interface.up()
         changed_interface_addresses = [interface.my_virt_ip, interface.peer_virt_ip]
@@ -296,7 +309,6 @@ class Node:
         print("ROUTING TABLE BEFORE UPDATE:")
         print(self.routing_table)
         print("----------------------")
-
         changed = False
         for node, routing_table_item in neighbor_routing_table.items():
             if node in self.routing_table:
@@ -347,6 +359,7 @@ class Node:
                            interface.addr.to_tuple())
 
     def routing_table_update_handler(self, ip_packet):
+        self.down_interfaces_list.clear()
         interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
         neighbor_routing_table = pickle.loads(ip_packet.payload)
         changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
