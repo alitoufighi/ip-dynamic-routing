@@ -6,7 +6,7 @@ class Interface:
         self.addr = Address(ip, port)
         self.my_virt_ip = my_virt_ip
         self.peer_virt_ip = peer_virt_ip
-        self.is_up = True
+        self.is_up = False
 
     def up(self):
         self.is_up = True
