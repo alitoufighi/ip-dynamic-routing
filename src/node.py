@@ -21,11 +21,11 @@ class Node:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(self.addr.to_tuple())
 
-        self.routing_table = RoutingTable()
-        self._bring_all_interfaces_up()
-
         self.protocol_switcher = {}
         self.down_interfaces_list = []
+
+        self.routing_table = RoutingTable()
+        self._bring_all_interfaces_up()
 
         print(f"Node {self.name} started.")
         print(self.addr)
@@ -244,19 +244,25 @@ class Node:
 
     def up_update_handler(self, ip_packet):
         interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
-        interface_to_neighbor.up()  # TODO:detect the interface which its neighbor turned it up and only turn it up!
-
-        self._initialize_routing_table()
+        interface_to_neighbor.up()  # TODO:detect the host which its neighbor turned it up and only turn it up!
 
         changed_interface_addresses = ip_packet.payload['interfaces']
-        for changed_interface in changed_interface_addresses:
-            if changed_interface in self.down_interfaces_list:
-                self.down_interfaces_list.remove(changed_interface)
-
         neighbor_routing_table = pickle.loads(ip_packet.payload['routing_table'])
-        changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
-        if changed:
-            self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
+
+        checked_before = all(address not in self.down_interfaces_list for address in changed_interface_addresses)
+        if not checked_before:
+            for changed_interface in changed_interface_addresses:
+                if changed_interface in self.down_interfaces_list:
+                    self.down_interfaces_list.remove(changed_interface)
+            self._initialize_routing_table()
+            changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
+            if changed:
+                self._broadcast_change_interface_to_neighbors(changed_interface_addresses=changed_interface_addresses,
+                                                              protocol=UP_PROTOCOL)
+        else:
+            changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
+            if changed:
+                self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def routing_table_update_handler(self, ip_packet):
         interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
