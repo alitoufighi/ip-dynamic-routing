@@ -98,6 +98,12 @@ class Node:
             changed_interface_addresses.append(interface.my_virt_ip)
             changed_interface_addresses.append(interface.peer_virt_ip)
 
+            try:
+                self.down_interfaces_list.remove(interface.my_virt_ip)
+                self.down_interfaces_list.remove(interface.peer_virt_ip)
+            except ValueError:
+                pass
+
         self._initialize_routing_table()
 
         self._broadcast_change_interface_to_neighbors(changed_interface_addresses=changed_interface_addresses,
@@ -106,6 +112,12 @@ class Node:
     def _bring_interface_up(self, up_interface):
         up_interface.up()
         changed_interface_addresses = [up_interface.my_virt_ip, up_interface.peer_virt_ip]
+
+        try:
+            self.down_interfaces_list.remove(up_interface.my_virt_ip)
+            self.down_interfaces_list.remove(up_interface.peer_virt_ip)
+        except ValueError:
+            pass
 
         self._initialize_routing_table()
 
@@ -313,6 +325,7 @@ class Node:
         interface_ip = f"{IP_PREFIX}.{interface_id}" if not interface_id.startswith(IP_PREFIX) else interface_id
         up_interface = self._find_interface(src_ip=interface_ip)
         self._bring_interface_up(up_interface)
+        print(f"{interface_ip} is up.")
 
     def _send_handler(self, *args):
         try:
