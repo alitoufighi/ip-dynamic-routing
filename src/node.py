@@ -11,6 +11,7 @@ from routing_table import *
 
 LNX_FILES_ROOT = '../tools/'
 MAX_TRANSMISSION_UNIT = 1400
+IP_PREFIX = '192.168.0'
 
 
 class Node:
@@ -36,8 +37,8 @@ class Node:
         return [interface for interface in self.interfaces if interface.is_up]
 
     def _broadcast_routing_table_to_neighbors(self, protocol):
-        print("BROADCASTING MY ROUTING TABLE TO MY NEIGHBORS")
-        print(self.routing_table)
+        #print("BROADCASTING MY ROUTING TABLE TO MY NEIGHBORS")
+        #print(self.routing_table)
         for interface in self.up_interfaces:
             ip_packet = IPPacket(src_ip=interface.my_virt_ip,
                                  dest_ip=interface.peer_virt_ip,
@@ -47,10 +48,25 @@ class Node:
                                interface.addr.to_tuple())
 
     def bring_up(self):
+        for interface in self.interfaces:
+            interface.up()
+            self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
+                                                                        forwarding_interface=interface.my_virt_ip)
+        self._broadcast_routing_table_to_neighbors(UP_PROTOCOL)
+
+    def up_update_handler(self, ip_packet):
+        interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
+        interface_to_neighbor.up()
+        self.routing_table.clear()
         for interface in self.up_interfaces:
             self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
                                                                         forwarding_interface=interface.my_virt_ip)
-        self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
+
+        neighbor_routing_table = pickle.loads(ip_packet.payload)
+        changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
+        if changed:
+            self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
+
 
     def _read_links(self):
         with open(f'{LNX_FILES_ROOT}{self.name}.lnx') as f:
@@ -74,7 +90,7 @@ class Node:
 
         for interface in self.up_interfaces:
             interface.down()
-            
+
     def _quit_handler(self):
         print("Exiting...")
         self._bring_all_interfaces_down()
@@ -111,7 +127,8 @@ class Node:
         except IndexError:
             print("Bad input")
             return
-        interface = self._find_interface(src_ip=interface_id)
+        interface_ip = f"{IP_PREFIX}.{interface_id}" if not interface_id.startswith(IP_PREFIX) else interface_id
+        interface = self._find_interface(src_ip=interface_ip)
         self.bring_interface_down(interface)
         print(f"{interface_id} is down.")
 
@@ -172,26 +189,6 @@ class Node:
             if changed:
                 self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
-    def up_update_handler(self, ip_packet):
-        
-        interface_to_neighbor = self._find_interface(dest_ip=ip_packet.header.src_addr)
-        interface_to_neighbor.up()  # TODO:detect the interface which its neighbor turned it up and only turn it up!
-        self.routing_table.clear()
-        self.down_interfaces_list.clear()
-
-        for interface in self.up_interfaces:
-            self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
-                                                                        forwarding_interface=interface.my_virt_ip)
-
-        changed_interface_addresses = ip_packet.payload['interfaces']
-        for changed_interface in changed_interface_addresses:
-            if changed_interface in self.down_interfaces_list:
-                self.down_interfaces_list.remove(changed_interface)
-
-        neighbor_routing_table = pickle.loads(ip_packet.payload['routing_table'])
-        changed = self._update_routing_table(neighbor_routing_table, interface_to_neighbor)
-        if changed:
-            self._broadcast_routing_table_to_neighbors(ROUTING_TABLE_UPDATE_PROTOCOL)
 
     def _up_handler(self, *args):
         try:
@@ -203,15 +200,14 @@ class Node:
         
         self.routing_table.clear()  # TODO: test
         self.down_interfaces_list.clear()
-        interface = self._find_interface(src_ip=interface_id)
+        interface_ip = f"{IP_PREFIX}.{interface_id}" if not interface_id.startswith(IP_PREFIX) else interface_id
+        interface = self._find_interface(src_ip=interface_ip)
         interface.up()
-        changed_interface_addresses = [interface.my_virt_ip, interface.peer_virt_ip]
         for interface in self.up_interfaces:
             self.routing_table[interface.my_virt_ip] = RoutingTableItem(distance=0,
                                                                         forwarding_interface=interface.my_virt_ip)
 
-        self._broadcast_change_interface_to_neighbors(changed_interface_addresses=changed_interface_addresses,
-                                                      protocol=UP_PROTOCOL)
+        self._broadcast_routing_table_to_neighbors(protocol=UP_PROTOCOL)
 
     def _find_interface(self, dest_ip=None, src_ip=None):
         for interface in self.interfaces:
@@ -261,7 +257,9 @@ class Node:
             "send": self._send_handler,
             "traceroute": self._traceroute_handler,
         }
-        return switcher.get(cmd, self._default_cmd)(*args)
+        result = switcher.get(cmd, self._default_cmd)(*args)
+        Util.print_last_line_of_output()
+        return result
 
     def _traceroute_handler(self, virtual_ip):
         next_interface = self._find_route(virtual_ip)
@@ -332,12 +330,14 @@ class Node:
         if protocol_num in self.protocol_switcher:
             print(f"handler for {protocol_num} protocol number already exists.")
             return
-        print(f"handler for {protocol_num} registered.")
+#        print(f"handler for {protocol_num} registered.")
         self.protocol_switcher[protocol_num] = handler
 
     def run_handler(self, ip_packet):
         protocol_number = int(ip_packet.header.protocol)
+        print(f"Running handler for protocol {protocol_number}.")
         self.protocol_switcher.get(protocol_number, lambda _: print('handler not registered'))(ip_packet)
+        Util.print_last_line_of_output()
 
     def print_handler(self, ip_packet):
         print("PRINT HANDLER CALLED")
