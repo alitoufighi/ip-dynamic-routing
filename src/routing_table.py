@@ -12,7 +12,7 @@ class RoutingTable:
         self.table = {}
 
     def clear(self):
-        self.table = {}
+        self.table.clear()
 
     def items(self):
         return self.table.items()
@@ -29,5 +29,11 @@ class RoutingTable:
     def __setitem__(self, key, value):
         self.table[key] = value
 
+    def __delitem__(self, key):
+        del self.table[key]
+
     def __str__(self):
-        return "\n".join([f"{node}: {routing_table_item}" for node, routing_table_item in self.table.items()])
+        retval = "DEST\t\tDISTANCE\tFORWARDING INTERFACE\n"
+        retval += "\n".join([f"{node}\t\t{routing_table_item.distance}\t{routing_table_item.forwarding_interface}"
+                             for node, routing_table_item in self.table.items()])
+        return retval

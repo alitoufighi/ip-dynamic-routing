@@ -1,4 +1,5 @@
 from interface import Interface
+import sys
 
 
 class Util:
@@ -9,3 +10,9 @@ class Util:
         :return: a list of Interface objects
         """
         return [Interface(*line.strip().split()) for line in l]
+
+    @staticmethod
+    def print_last_line_of_output():
+        print("---------------------------------")
+        print("> ", end="")
+        sys.stdout.flush()
