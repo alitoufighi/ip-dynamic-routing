@@ -33,7 +33,8 @@ class RoutingTable:
         del self.table[key]
 
     def __str__(self):
-        retval = "DEST\t\tDISTANCE\tFORWARDING INTERFACE\n"
-        retval += "\n".join([f"{node}\t\t{routing_table_item.distance}\t{routing_table_item.forwarding_interface}"
-                             for node, routing_table_item in self.table.items()])
+        retval = "NO.\tDESTINATION\t\tDISTANCE\tFORWARDING INTERFACE\n"
+        retval += "\n".join([f"{index + 1}\t{node}\t\t{routing_table_item.distance}"
+                             f"\t\t{routing_table_item.forwarding_interface}"
+                             for index, (node, routing_table_item) in enumerate(self.table.items())])
         return retval
